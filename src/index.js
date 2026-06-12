@@ -21,6 +21,7 @@ app.use(express.json()); // Permitimos que el servidor entienda datos en formato
 
 import userRoutes from "./routes/userRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
+import orderRoutes from "./routes/orderRoutes.js";
 
 // 5. Rutas Básicas (El "menú")
 // Cuando alguien entre a "http://localhost:5000/", el servidor responde esto:
@@ -30,6 +31,7 @@ app.get('/', (req, res) => {
 
 app.use("/api/users", userRoutes);
 app.use("/api/products", productRoutes);
+app.use("/api/orders", orderRoutes);
 
 // 6. Encender el servidor
 const PORT = process.env.PORT || 5000; // Usamos el puerto del .env o el 5000 por defecto
