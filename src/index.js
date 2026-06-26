@@ -16,12 +16,17 @@ connectDB();
 const app = express();
 
 // 4. Middlewares (Reglas de la cocina)
-app.use(cors()); // Permitimos que React nos haga peticiones
+app.use(cors({
+    origin: [process.env.FRONTEND_URL, 'http://localhost:5173'],
+    credentials: true
+})); // Permitimos peticiones solo desde nuestro frontend
 app.use(express.json()); // Permitimos que el servidor entienda datos en formato JSON
 
 import userRoutes from "./routes/userRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
+import uploadRoutes from "./routes/uploadRoutes.js";
+import favoriteRoutes from "./routes/favoriteRoutes.js";
 
 // 5. Rutas Básicas (El "menú")
 // Cuando alguien entre a "http://localhost:5000/", el servidor responde esto:
@@ -32,6 +37,8 @@ app.get('/', (req, res) => {
 app.use("/api/users", userRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/favorites", favoriteRoutes);
 
 // 6. Encender el servidor
 const PORT = process.env.PORT || 5000; // Usamos el puerto del .env o el 5000 por defecto
