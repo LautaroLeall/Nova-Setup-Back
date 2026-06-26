@@ -64,6 +64,21 @@ export const getProductById = async (req, res) => {
     const product = await Product.findById(req.params.id);
 
     if (product) {
+      // AUTOSYNC: Recalcular las reseñas reales para arreglar posibles desincronizaciones 
+      // si se borró una reseña directo en la base de datos.
+      const reviews = await Review.find({ product: product._id });
+      const numReviews = reviews.length;
+      const rating = numReviews === 0 
+        ? 0 
+        : reviews.reduce((acc, item) => item.rating + acc, 0) / numReviews;
+
+      // Si los datos guardados no coinciden con la realidad, se autocorrigen
+      if (product.numReviews !== numReviews || product.rating !== rating) {
+        product.numReviews = numReviews;
+        product.rating = rating;
+        await product.save();
+      }
+
       res.json(product);
     } else {
       res.status(404).json({ message: 'Producto no encontrado' });
