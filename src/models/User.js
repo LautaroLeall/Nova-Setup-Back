@@ -29,20 +29,13 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    verificationToken: {
-      type: String,
-    },
+
     isAdmin: {
       type: Boolean,
       required: true,
       default: false,
     },
-    favorites: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Product",
-      },
-    ],
+
     shippingAddress: {
       fullName: { type: String, default: "" },
       address: { type: String, default: "" },
