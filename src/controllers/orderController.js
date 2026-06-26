@@ -100,10 +100,11 @@ export const createMPPreference = async (req, res) => {
         pending: `${process.env.FRONTEND_URL}/payment/pending`,
       },
       external_reference: order._id.toString(),
-      // notification_url solo se agrega si tenemos una URL pública (no localhost)
-      // En producción: descomentar y poner tu dominio real
-      // notification_url: `${process.env.BACKEND_URL}/api/orders/mp-webhook`,
     };
+
+    if (process.env.BACKEND_URL) {
+      preferenceBody.notification_url = `${process.env.BACKEND_URL}/api/orders/mp-webhook`;
+    }
 
     console.log("Sending preferenceBody to MP:", JSON.stringify(preferenceBody, null, 2));
 
@@ -143,12 +144,11 @@ export const mpWebhook = async (req, res) => {
     }
 
     // Obtener detalles del pago desde la API de MP
+    const mpClient = new MercadoPagoConfig({
+      accessToken: process.env.MP_ACCESS_TOKEN,
+    });
     const paymentClient = new Payment(mpClient);
     const paymentInfo = await paymentClient.get({ id: paymentId });
-
-    if (paymentInfo.status !== "approved") {
-      return res.status(200).json({ message: `Pago no aprobado: ${paymentInfo.status}` });
-    }
 
     // Vincular con la orden usando external_reference
     const orderId = paymentInfo.external_reference;
@@ -158,26 +158,43 @@ export const mpWebhook = async (req, res) => {
       return res.status(404).json({ message: "Orden no encontrada." });
     }
 
-    // Actualizar la orden a pagada
-    order.isPaid = true;
-    order.paidAt = new Date();
-    order.status = "paid";
+    // Actualizar metadata del pago siempre
     order.paymentResult = {
       mp_payment_id: paymentInfo.id.toString(),
       mp_status: paymentInfo.status,
       mp_status_detail: paymentInfo.status_detail,
       mp_payment_type: paymentInfo.payment_type_id,
     };
-    await order.save();
 
-    // Descontar el stock de cada producto comprado
-    for (const item of order.orderItems) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { countInStock: -item.qty },
-      });
+    if (paymentInfo.status === "approved") {
+      // Evitar descontar stock doble si ya estaba procesada como pagada
+      if (!order.isPaid) {
+        order.isPaid = true;
+        order.paidAt = new Date();
+        order.status = "paid";
+
+        // Descontar el stock
+        for (const item of order.orderItems) {
+          await Product.findByIdAndUpdate(item.product, {
+            $inc: { countInStock: -item.qty },
+          });
+        }
+      }
+    } else if (paymentInfo.status === "rejected" || paymentInfo.status === "cancelled") {
+      order.status = "cancelled";
+      order.isPaid = false;
+    } else if (paymentInfo.status === "pending" || paymentInfo.status === "in_process") {
+      order.status = "pending";
+      order.isPaid = false;
+    } else if (paymentInfo.status === "refunded") {
+      order.status = "refunded";
+      order.isPaid = false;
+      // Aquí se podría restaurar el stock, pero por ahora solo actualizamos el estado
     }
 
-    console.log(`✅ Pago aprobado para orden ${orderId}`);
+    await order.save();
+
+    console.log(`✅ Webhook procesado para orden ${orderId} con estado ${paymentInfo.status}`);
     res.status(200).json({ message: "Webhook procesado correctamente." });
   } catch (error) {
     console.error("Error en webhook MP:", error);
@@ -209,5 +226,96 @@ export const getOrderById = async (req, res) => {
   } catch (error) {
     console.error("Error al obtener orden:", error);
     res.status(500).json({ message: "Error al obtener la orden." });
+  }
+};
+
+// @desc    Obtener todas las órdenes (Solo Admin)
+// @route   GET /api/orders
+// @access  Private/Admin
+export const getOrders = async (req, res) => {
+  try {
+    const orders = await Order.find({}).populate("user", "id firstName lastName email").sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (error) {
+    console.error("Error al obtener órdenes:", error);
+    res.status(500).json({ message: "Error al obtener las órdenes." });
+  }
+};
+
+// @desc    Actualizar estado general de la orden (Solo Admin)
+// @route   PUT /api/orders/:id/status
+// @access  Private/Admin
+export const updateOrderStatus = async (req, res) => {
+  try {
+    const { status, isPaid, isDelivered } = req.body;
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ message: "Orden no encontrada." });
+    }
+
+    if (status) order.status = status;
+    
+    if (isPaid !== undefined) {
+      order.isPaid = isPaid;
+      if (isPaid && !order.paidAt) order.paidAt = new Date();
+      if (!isPaid) order.paidAt = undefined;
+    }
+
+    if (isDelivered !== undefined) {
+      order.isDelivered = isDelivered;
+      if (isDelivered && !order.deliveredAt) order.deliveredAt = new Date();
+      if (!isDelivered) order.deliveredAt = undefined;
+    }
+
+    const updatedOrder = await order.save();
+    res.json(updatedOrder);
+  } catch (error) {
+    console.error("Error al actualizar estado de la orden:", error);
+    res.status(500).json({ message: "Error al actualizar estado." });
+  }
+};
+
+// @desc    Confirmar recepción por parte del usuario
+// @route   PUT /api/orders/:id/confirm-delivery
+// @access  Private
+export const confirmDelivery = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ message: "Orden no encontrada." });
+    }
+
+    // Verificar que la orden pertenece al usuario
+    if (order.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "No autorizado para confirmar esta orden." });
+    }
+
+    order.isUserConfirmed = true;
+    order.status = "delivered";
+    if (!order.isDelivered) {
+      order.isDelivered = true;
+      order.deliveredAt = new Date();
+    }
+
+    const updatedOrder = await order.save();
+    res.json(updatedOrder);
+  } catch (error) {
+    console.error("Error al confirmar entrega:", error);
+    res.status(500).json({ message: "Error al confirmar recepción." });
+  }
+};
+
+// @desc    Obtener las órdenes del usuario logueado
+// @route   GET /api/orders/myorders
+// @access  Private
+export const getMyOrders = async (req, res) => {
+  try {
+    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (error) {
+    console.error("Error al obtener mis órdenes:", error);
+    res.status(500).json({ message: "Error al obtener tus órdenes." });
   }
 };

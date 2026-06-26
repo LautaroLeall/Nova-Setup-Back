@@ -10,6 +10,7 @@ const orderItemSchema = new mongoose.Schema({
     ref: "Product",
     required: true,
   },
+  isReviewed: { type: Boolean, default: false },
 });
 
 const orderSchema = new mongoose.Schema(
@@ -31,11 +32,14 @@ const orderSchema = new mongoose.Schema(
     totalPrice: { type: Number, required: true, default: 0 },
     status: {
       type: String,
-      enum: ["pending", "paid", "failed", "cancelled"],
+      enum: ["pending", "paid", "shipped", "delivered", "failed", "cancelled"],
       default: "pending",
     },
     isPaid: { type: Boolean, default: false },
     paidAt: { type: Date },
+    isDelivered: { type: Boolean, default: false },
+    deliveredAt: { type: Date },
+    isUserConfirmed: { type: Boolean, default: false }, // Agregado para confirmación del usuario
     paymentResult: {
       mp_payment_id: { type: String },
       mp_status: { type: String },
