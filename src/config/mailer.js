@@ -12,7 +12,7 @@ const getTransporter = () => {
 
 export const sendVerificationEmail = async (to, token) => {
   const verifyUrl = `${process.env.FRONTEND_URL}/verify-email/${token}`;
-  
+
   const mailOptions = {
     from: `"Nova SetUp" <${process.env.EMAIL_USER}>`,
     to,
@@ -35,10 +35,11 @@ export const sendVerificationEmail = async (to, token) => {
 
 export const sendRestockEmail = async (toEmails, product) => {
   const productUrl = `${process.env.FRONTEND_URL}/product/${product._id}`;
-  
+
   const mailOptions = {
     from: `"Nova SetUp" <${process.env.EMAIL_USER}>`,
-    to: toEmails,
+    to: process.env.EMAIL_USER, // Email genérico visible en el "To:"
+    bcc: toEmails,              // MEJ-08: Usuarios en BCC para no exponer emails entre sí
     subject: `¡Buenas noticias! ${product.name} vuelve a estar en stock`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
@@ -57,7 +58,7 @@ export const sendRestockEmail = async (toEmails, product) => {
 
 export const sendPasswordResetEmail = async (to, token) => {
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
-  
+
   const mailOptions = {
     from: `"Nova SetUp" <${process.env.EMAIL_USER}>`,
     to,
