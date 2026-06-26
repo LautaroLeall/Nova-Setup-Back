@@ -106,7 +106,9 @@ export const createMPPreference = async (req, res) => {
       preferenceBody.notification_url = `${process.env.BACKEND_URL}/api/orders/mp-webhook`;
     }
 
-    console.log("Sending preferenceBody to MP:", JSON.stringify(preferenceBody, null, 2));
+    if (process.env.NODE_ENV !== 'production') {
+      console.log("Sending preferenceBody to MP:", JSON.stringify(preferenceBody, null, 2));
+    }
 
     const preference = await preferenceClient.create({ body: preferenceBody });
 
@@ -255,16 +257,22 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     if (status) order.status = status;
-    
+
     if (isPaid !== undefined) {
       order.isPaid = isPaid;
-      if (isPaid && !order.paidAt) order.paidAt = new Date();
+      if (isPaid && !order.paidAt) {
+        order.paidAt = new Date();
+        if (order.status === "pending") order.status = "paid";
+      }
       if (!isPaid) order.paidAt = undefined;
     }
 
     if (isDelivered !== undefined) {
       order.isDelivered = isDelivered;
-      if (isDelivered && !order.deliveredAt) order.deliveredAt = new Date();
+      if (isDelivered && !order.deliveredAt) {
+        order.deliveredAt = new Date();
+        if (order.status === "paid" || order.status === "pending") order.status = "shipped";
+      }
       if (!isDelivered) order.deliveredAt = undefined;
     }
 
@@ -285,6 +293,11 @@ export const confirmDelivery = async (req, res) => {
 
     if (!order) {
       return res.status(404).json({ message: "Orden no encontrada." });
+    }
+
+    // BUG-05: Verificar que la orden esté en estado válido para confirmar entrega
+    if (!['shipped', 'paid'].includes(order.status) && !order.isDelivered && !order.isPaid) {
+      return res.status(400).json({ message: "La orden no puede confirmarse: no está en estado de envío o pago." });
     }
 
     // Verificar que la orden pertenece al usuario
