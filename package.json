@@ -7,8 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "data:import": "node src/seeder.js",
-    "data:destroy": "node src/seeder.js -d"
+    "seed:pc": "node src/scripts/seed_pc.js"
   },
   "keywords": [],
   "author": "",
@@ -17,11 +16,10 @@
     "axios": "^1.18.1",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^1.41.3",
-    "colors": "^1.4.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "google-auth-library": "^10.9.0",
     "jsonwebtoken": "^9.0.3",
     "mercadopago": "^3.1.0",
     "mongoose": "^9.6.2",
