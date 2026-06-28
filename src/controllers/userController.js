@@ -158,21 +158,75 @@ const updateUserProfile = async (req, res) => {
     const user = await User.findById(req.user._id);
 
     if (user) {
-      user.firstName = req.body.firstName || user.firstName;
-      user.lastName = req.body.lastName || user.lastName;
+      // Validaciones Regex
+      const nameRegex = /^[A-Za-záéíóúÁÉÍÓÚñÑ\s]{2,50}$/;
+      const addressRegex = /^[A-Za-z0-9áéíóúÁÉÍÓÚñÑ\s\.,'-]{5,100}$/;
+      const phoneRegex = /^\+?[0-9\s\-]{8,15}$/;
+      const postalCodeRegex = /^([A-Z]{1}\d{4}[A-Z]{3}|\d{4})$/i;
+
+      // Validación de Datos Personales
+      if (req.body.firstName) {
+        if (!nameRegex.test(req.body.firstName.trim())) {
+          return res.status(400).json({ message: "El nombre es inválido (solo letras, 2 a 50 caracteres)" });
+        }
+        user.firstName = req.body.firstName.trim();
+      }
+
+      if (req.body.lastName) {
+        if (!nameRegex.test(req.body.lastName.trim())) {
+          return res.status(400).json({ message: "El apellido es inválido (solo letras, 2 a 50 caracteres)" });
+        }
+        user.lastName = req.body.lastName.trim();
+      }
 
       if (req.body.password) {
+        if (req.body.password.length < 6) {
+          return res.status(400).json({ message: "La contraseña debe tener al menos 6 caracteres" });
+        }
         user.password = req.body.password;
       }
 
-      if (req.body.shippingAddress) {
+      // Validación de Dirección de Envío
+      if (req.body.shippingAddress && Object.keys(req.body.shippingAddress).length > 0) {
+        const sa = req.body.shippingAddress;
+
+        // Si mandan al menos un campo, validamos todos los que manden
+        if (sa.fullName && !nameRegex.test(sa.fullName.trim())) {
+          return res.status(400).json({ message: "El nombre del receptor es inválido" });
+        }
+        if (sa.address && !addressRegex.test(sa.address.trim())) {
+          return res.status(400).json({ message: "La dirección debe tener entre 5 y 100 caracteres alfanuméricos" });
+        }
+        if (sa.postalCode && !postalCodeRegex.test(sa.postalCode.trim())) {
+          return res.status(400).json({ message: "El código postal no tiene un formato válido para Argentina" });
+        }
+        if (sa.phone && !phoneRegex.test(sa.phone.trim())) {
+          return res.status(400).json({ message: "El teléfono es inválido" });
+        }
+
+        // Validación de Provincia de Argentina
+        const validProvinces = [
+          "Buenos Aires", "Catamarca", "Chaco", "Chubut", "Ciudad Autónoma de Buenos Aires",
+          "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja",
+          "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis",
+          "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán"
+        ];
+
+        if (sa.province && !validProvinces.includes(sa.province)) {
+          return res.status(400).json({ message: "La provincia seleccionada no es válida" });
+        }
+
+        if (sa.city && sa.city.trim().length < 2) {
+          return res.status(400).json({ message: "La ciudad debe tener al menos 2 caracteres" });
+        }
+
         user.shippingAddress = {
-          fullName: req.body.shippingAddress.fullName || user.shippingAddress?.fullName || "",
-          address: req.body.shippingAddress.address || user.shippingAddress?.address || "",
-          city: req.body.shippingAddress.city || user.shippingAddress?.city || "",
-          postalCode: req.body.shippingAddress.postalCode || user.shippingAddress?.postalCode || "",
-          province: req.body.shippingAddress.province || user.shippingAddress?.province || "",
-          phone: req.body.shippingAddress.phone || user.shippingAddress?.phone || "",
+          fullName: sa.fullName ? sa.fullName.trim() : user.shippingAddress?.fullName || "",
+          address: sa.address ? sa.address.trim() : user.shippingAddress?.address || "",
+          city: sa.city ? sa.city.trim() : user.shippingAddress?.city || "",
+          postalCode: sa.postalCode ? sa.postalCode.trim().toUpperCase() : user.shippingAddress?.postalCode || "",
+          province: sa.province || user.shippingAddress?.province || "",
+          phone: sa.phone ? sa.phone.trim() : user.shippingAddress?.phone || "",
         };
       }
 
@@ -227,12 +281,12 @@ const verifyEmail = async (req, res) => {
     // Asignamos la contraseña ya hasheada directamente en el objeto interno
     // sin pasar por pre-save (usando set en la BD directamente via findOneAndUpdate sería más seguro,
     // pero como el pre-save verifica isModified, funciona correctamente):
-    newUser.password = decoded.password; 
+    newUser.password = decoded.password;
     // NOTA: El pre-save de bcrypt verifica isModified('password').
     // Como es un documento nuevo (isNew=true), isModified retorna true,
     // lo cual causaría doble hash. Por eso hacemos el siguiente bypass:
     newUser.$ignore = ['password']; // No es un método real de mongoose
-    
+
     // La forma más segura: usar insertOne directo para evitar el middleware
     const User2 = User;
     await User2.collection.insertOne({
