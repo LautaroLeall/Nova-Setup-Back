@@ -88,7 +88,7 @@ const registerUser = async (req, res) => {
     res.status(200).json({ message: "Usuario registrado con éxito. Por favor revisa tu bandeja de entrada para verificar tu cuenta." });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Error en el servidor" });
+    res.status(500).json({ message: "Error en el servidor: " + error.message });
   }
 };
 
