@@ -69,6 +69,40 @@ export const getProductById = async (req, res) => {
   }
 };
 
+// Helper para validar datos del producto
+const validateProductData = (data) => {
+  const { name, description, brand, category, price, discountPrice, countInStock } = data;
+
+  if (!name || !description || !brand || !category || price === undefined) {
+    return "Por favor, complete todos los campos obligatorios";
+  }
+
+  if (name.trim().length < 3 || name.trim().length > 100) return "El nombre debe tener entre 3 y 100 caracteres";
+  if (brand.trim().length < 2 || brand.trim().length > 50) return "La marca debe tener entre 2 y 50 caracteres";
+  if (description.trim().length < 10 || description.trim().length > 1000) return "La descripción debe tener entre 10 y 1000 caracteres";
+
+  const validCategories = [
+    "Teclados", "Monitores", "Ratones", "Audio", "Accesorios",
+    "Procesadores", "Mothers", "Coolers", "Memorias RAM",
+    "Placas de Video", "Almacenamiento", "Fuentes", "Gabinetes", "Periféricos"
+  ];
+  if (!validCategories.includes(category)) return "Categoría inválida";
+
+  if (Number(price) <= 0) return "El precio debe ser mayor a 0";
+
+  if (countInStock !== undefined && (!Number.isInteger(Number(countInStock)) || Number(countInStock) < 0)) {
+    return "El stock debe ser un número entero mayor o igual a 0";
+  }
+
+  if (discountPrice !== undefined && discountPrice !== null && discountPrice !== "") {
+    const dPrice = Number(discountPrice);
+    if (dPrice < 0) return "El precio de descuento no puede ser negativo";
+    if (dPrice >= Number(price)) return "El precio con descuento debe ser MENOR al precio original";
+  }
+
+  return null;
+};
+
 // @desc    Crear un nuevo producto
 // @route   POST /api/products
 // @access  Private/Admin
@@ -76,8 +110,9 @@ export const createProduct = async (req, res) => {
   try {
     const { name, description, brand, category, price, discountPrice, countInStock, images, badges, features } = req.body;
 
-    if (!name || !description || !brand || !category || !price) {
-      return res.status(400).json({ message: "Por favor, complete todos los campos obligatorios" });
+    const validationError = validateProductData(req.body);
+    if (validationError) {
+      return res.status(400).json({ message: validationError });
     }
 
     const slug = name.toLowerCase()
@@ -115,6 +150,21 @@ export const updateProduct = async (req, res) => {
     const product = await Product.findById(req.params.id);
 
     if (product) {
+      // Combinar datos existentes con nuevos para validar el conjunto final
+      const dataToValidate = {
+        name: name || product.name,
+        description: description || product.description,
+        brand: brand || product.brand,
+        category: category || product.category,
+        price: price !== undefined ? price : product.price,
+        discountPrice: discountPrice !== undefined ? discountPrice : product.discountPrice,
+        countInStock: countInStock !== undefined ? countInStock : product.countInStock
+      };
+
+      const validationError = validateProductData(dataToValidate);
+      if (validationError) {
+        return res.status(400).json({ message: validationError });
+      }
       product.name = name || product.name;
       if (name) {
         product.slug = name.toLowerCase()
