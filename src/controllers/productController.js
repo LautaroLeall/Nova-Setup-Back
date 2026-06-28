@@ -1,6 +1,7 @@
 import Product from '../models/Product.js';
 import Order from '../models/Order.js';
 import Review from '../models/Review.js';
+import User from '../models/User.js';
 import { sendRestockEmail } from '../config/mailer.js';
 
 // Helper para sanitizar inputs de regex (SEC-04)
@@ -144,14 +145,12 @@ export const updateProduct = async (req, res) => {
       // Enviar notificaciones si fue reabastecido
       if (wasRestocked && notifyList.length > 0) {
         try {
-          const populatedProduct = await Product.findById(updatedProduct._id).populate("notifyOnRestock", "email");
-          const emails = notifyList
-            .map(id => populatedProduct.notifyOnRestock?.find(u => u._id.toString() === id.toString())?.email)
-            .filter(Boolean);
+          const users = await User.find({ _id: { $in: notifyList } }).select('email');
+          const emails = users.map(u => u.email).filter(Boolean);
 
           if (emails.length > 0) {
             // MEJ-08: Usar BCC para no exponer emails entre usuarios
-            await sendRestockEmail(emails, populatedProduct);
+            await sendRestockEmail(emails, updatedProduct);
           }
         } catch (emailError) {
           console.error("Error al enviar correos de restock:", emailError.message);
