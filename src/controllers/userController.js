@@ -23,7 +23,7 @@ const authUser = async (req, res) => {
         return res.status(401).json({ message: "Por favor, verifica tu correo electrónico antes de iniciar sesión" });
       }
 
-      generateToken(res, user._id);
+      const token = generateToken(res, user._id);
 
       res.json({
         _id: user._id,
@@ -32,6 +32,7 @@ const authUser = async (req, res) => {
         email: user.email,
         isAdmin: user.isAdmin,
         shippingAddress: user.shippingAddress,
+        token: token,
       });
     } else {
       res.status(401).json({ message: "Email o contraseña incorrectos" });
@@ -232,7 +233,7 @@ const updateUserProfile = async (req, res) => {
 
       const updatedUser = await user.save();
 
-      generateToken(res, updatedUser._id);
+      const token = generateToken(res, updatedUser._id);
 
       res.json({
         _id: updatedUser._id,
@@ -241,6 +242,7 @@ const updateUserProfile = async (req, res) => {
         email: updatedUser.email,
         isAdmin: updatedUser.isAdmin,
         shippingAddress: updatedUser.shippingAddress,
+        token: token,
       });
     } else {
       res.status(404).json({ message: "Usuario no encontrado" });
@@ -346,7 +348,7 @@ const googleAuth = async (req, res) => {
       if (needsSave) await user.save();
     }
 
-    generateToken(res, user._id);
+    const token = generateToken(res, user._id);
 
     res.json({
       _id: user._id,
@@ -355,6 +357,7 @@ const googleAuth = async (req, res) => {
       email: user.email,
       isAdmin: user.isAdmin,
       shippingAddress: user.shippingAddress,
+      token: token,
     });
   } catch (error) {
     console.error("Error en google auth:", error.message);
