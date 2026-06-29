@@ -85,7 +85,7 @@ const registerUser = async (req, res) => {
 
     await sendVerificationEmail(email, tempToken);
 
-    res.status(200).json({ message: "Usuario registrado con éxito. Por favor revisa tu bandeja de entrada para verificar tu cuenta." });
+    res.status(200).json({ message: "Usuario registrado con éxito. Por favor revisa tu bandeja de entrada (y tu carpeta de SPAM) para verificar tu cuenta." });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error en el servidor: " + error.message });
