@@ -1,6 +1,7 @@
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import Order from "../models/Order.js";
 import Product from "../models/Product.js";
+import { sendOrderSuccessEmail } from "../config/mailer.js";
 
 // El cliente se inicializará dentro del controlador para asegurar que process.env esté cargado
 
@@ -154,7 +155,7 @@ export const mpWebhook = async (req, res) => {
 
     // Vincular con la orden usando external_reference
     const orderId = paymentInfo.external_reference;
-    const order = await Order.findById(orderId);
+    const order = await Order.findById(orderId).populate("user", "email firstName lastName");
 
     if (!order) {
       return res.status(404).json({ message: "Orden no encontrada." });
@@ -180,6 +181,11 @@ export const mpWebhook = async (req, res) => {
           await Product.findByIdAndUpdate(item.product, {
             $inc: { countInStock: -item.qty },
           });
+        }
+
+        // Enviar correo de éxito al usuario
+        if (order.user && order.user.email) {
+          sendOrderSuccessEmail(order.user.email, order).catch(err => console.error("Error enviando email de orden:", err));
         }
       }
     } else if (paymentInfo.status === "rejected" || paymentInfo.status === "cancelled") {
@@ -250,30 +256,51 @@ export const getOrders = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { status, isPaid, isDelivered } = req.body;
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).populate("user", "email firstName lastName");
 
     if (!order) {
       return res.status(404).json({ message: "Orden no encontrada." });
     }
 
-    if (status) order.status = status;
-
-    if (isPaid !== undefined) {
-      order.isPaid = isPaid;
-      if (isPaid && !order.paidAt) {
-        order.paidAt = new Date();
-        if (order.status === "pending") order.status = "paid";
+    if (status === "cancelled") {
+      // Si la orden estaba pagada, devolvemos el stock
+      if (order.isPaid) {
+        for (const item of order.orderItems) {
+          await Product.findByIdAndUpdate(item.product, {
+            $inc: { countInStock: item.qty },
+          });
+        }
       }
-      if (!isPaid) order.paidAt = undefined;
-    }
+      order.status = "cancelled";
+      order.isPaid = false;
+      order.paidAt = undefined;
+      order.isDelivered = false;
+      order.deliveredAt = undefined;
+    } else {
+      if (status) order.status = status;
 
-    if (isDelivered !== undefined) {
-      order.isDelivered = isDelivered;
-      if (isDelivered && !order.deliveredAt) {
-        order.deliveredAt = new Date();
-        if (order.status === "paid" || order.status === "pending") order.status = "shipped";
+      if (isPaid !== undefined) {
+        order.isPaid = isPaid;
+        if (isPaid && !order.paidAt) {
+          order.paidAt = new Date();
+          if (order.status === "pending") order.status = "paid";
+          
+          // Enviar correo de éxito al usuario
+          if (order.user && order.user.email) {
+            sendOrderSuccessEmail(order.user.email, order).catch(err => console.error("Error enviando email de orden:", err));
+          }
+        }
+        if (!isPaid) order.paidAt = undefined;
       }
-      if (!isDelivered) order.deliveredAt = undefined;
+
+      if (isDelivered !== undefined) {
+        order.isDelivered = isDelivered;
+        if (isDelivered && !order.deliveredAt) {
+          order.deliveredAt = new Date();
+          if (order.status === "paid" || order.status === "pending") order.status = "shipped";
+        }
+        if (!isDelivered) order.deliveredAt = undefined;
+      }
     }
 
     const updatedOrder = await order.save();
