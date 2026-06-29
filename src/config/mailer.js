@@ -2,10 +2,12 @@ import nodemailer from 'nodemailer';
 
 const getTransporter = () => {
   return nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false, // TLS
     auth: {
-      user: process.env.EMAIL_USER, // Tu correo de Gmail
-      pass: process.env.EMAIL_PASS, // Tu contraseña de aplicación de Gmail
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
     },
   });
 };
