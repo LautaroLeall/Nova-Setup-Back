@@ -2,8 +2,22 @@ import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import Order from "../models/Order.js";
 import Product from "../models/Product.js";
 import { sendOrderSuccessEmail } from "../config/mailer.js";
+import mongoose from "mongoose";
 
-// El cliente se inicializará dentro del controlador para asegurar que process.env esté cargado
+let mpClient = null;
+const getMpClient = () => {
+  if (!mpClient) {
+    mpClient = new MercadoPagoConfig({
+      accessToken: process.env.MP_ACCESS_TOKEN,
+    });
+  }
+  return mpClient;
+};
+
+const checkOrderOwnership = (order, user) => {
+  const orderUserId = order.user._id ? order.user._id.toString() : order.user.toString();
+  return orderUserId === user._id.toString() || user.isAdmin;
+};
 
 // ─────────────────────────────────────────────
 // POST /api/orders
@@ -56,7 +70,6 @@ export const createOrder = async (req, res) => {
     const createdOrder = await order.save();
     res.status(201).json(createdOrder);
   } catch (error) {
-    console.error("Error al crear orden:", error);
     res.status(500).json({ message: "Error al crear la orden." });
   }
 };
@@ -74,15 +87,11 @@ export const createMPPreference = async (req, res) => {
       return res.status(404).json({ message: "Orden no encontrada." });
     }
 
-    // Verificar que la orden pertenece al usuario autenticado
-    if (order.user._id.toString() !== req.user._id.toString()) {
+    if (!checkOrderOwnership(order, req.user)) {
       return res.status(403).json({ message: "No autorizado." });
     }
 
-    // Inicializamos aquí adentro para asegurar que lea correctamente del .env
-    const mpClient = new MercadoPagoConfig({
-      accessToken: process.env.MP_ACCESS_TOKEN,
-    });
+    const mpClient = getMpClient();
     const preferenceClient = new Preference(mpClient);
 
     const preferenceBody = {
@@ -107,10 +116,6 @@ export const createMPPreference = async (req, res) => {
       preferenceBody.notification_url = `${process.env.BACKEND_URL}/api/orders/mp-webhook`;
     }
 
-    if (process.env.NODE_ENV !== 'production') {
-      console.log("Sending preferenceBody to MP:", JSON.stringify(preferenceBody, null, 2));
-    }
-
     const preference = await preferenceClient.create({ body: preferenceBody });
 
     // Guardar el preference ID en la orden
@@ -123,7 +128,6 @@ export const createMPPreference = async (req, res) => {
       sandboxInitPoint: preference.sandbox_init_point, // URL de sandbox
     });
   } catch (error) {
-    console.error("Error al crear preferencia MP:", error);
     res.status(500).json({ message: "Error al crear la preferencia de pago." });
   }
 };
@@ -147,9 +151,7 @@ export const mpWebhook = async (req, res) => {
     }
 
     // Obtener detalles del pago desde la API de MP
-    const mpClient = new MercadoPagoConfig({
-      accessToken: process.env.MP_ACCESS_TOKEN,
-    });
+    const mpClient = getMpClient();
     const paymentClient = new Payment(mpClient);
     const paymentInfo = await paymentClient.get({ id: paymentId });
 
@@ -170,42 +172,48 @@ export const mpWebhook = async (req, res) => {
     };
 
     if (paymentInfo.status === "approved") {
-      // Evitar descontar stock doble si ya estaba procesada como pagada
       if (!order.isPaid) {
         order.isPaid = true;
         order.paidAt = new Date();
         order.status = "paid";
 
-        // Descontar el stock
-        for (const item of order.orderItems) {
-          await Product.findByIdAndUpdate(item.product, {
-            $inc: { countInStock: -item.qty },
-          });
-        }
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+          for (const item of order.orderItems) {
+            await Product.findByIdAndUpdate(item.product, {
+              $inc: { countInStock: -item.qty },
+            }, { session });
+          }
+          await order.save({ session });
+          await session.commitTransaction();
+          session.endSession();
 
-        // Enviar correo de éxito al usuario
-        if (order.user && order.user.email) {
-          sendOrderSuccessEmail(order.user.email, order).catch(err => console.error("Error enviando email de orden:", err));
+          if (order.user && order.user.email) {
+            sendOrderSuccessEmail(order.user.email, order).catch(() => {});
+          }
+        } catch (error) {
+          await session.abortTransaction();
+          session.endSession();
+          throw error;
         }
       }
-    } else if (paymentInfo.status === "rejected" || paymentInfo.status === "cancelled") {
-      order.status = "cancelled";
-      order.isPaid = false;
-    } else if (paymentInfo.status === "pending" || paymentInfo.status === "in_process") {
-      order.status = "pending";
-      order.isPaid = false;
-    } else if (paymentInfo.status === "refunded") {
-      order.status = "refunded";
-      order.isPaid = false;
-      // Aquí se podría restaurar el stock, pero por ahora solo actualizamos el estado
+    } else {
+      if (paymentInfo.status === "rejected" || paymentInfo.status === "cancelled") {
+        order.status = "cancelled";
+        order.isPaid = false;
+      } else if (paymentInfo.status === "pending" || paymentInfo.status === "in_process") {
+        order.status = "pending";
+        order.isPaid = false;
+      } else if (paymentInfo.status === "refunded") {
+        order.status = "refunded";
+        order.isPaid = false;
+      }
+      await order.save();
     }
 
-    await order.save();
-
-    console.log(`✅ Webhook procesado para orden ${orderId} con estado ${paymentInfo.status}`);
     res.status(200).json({ message: "Webhook procesado correctamente." });
   } catch (error) {
-    console.error("Error en webhook MP:", error);
     res.status(500).json({ message: "Error procesando webhook." });
   }
 };
@@ -223,16 +231,12 @@ export const getOrderById = async (req, res) => {
     }
 
     // Solo el dueño de la orden o un admin puede verla
-    if (
-      order.user._id.toString() !== req.user._id.toString() &&
-      !req.user.isAdmin
-    ) {
+    if (!checkOrderOwnership(order, req.user)) {
       return res.status(403).json({ message: "No autorizado." });
     }
 
     res.json(order);
   } catch (error) {
-    console.error("Error al obtener orden:", error);
     res.status(500).json({ message: "Error al obtener la orden." });
   }
 };
@@ -245,7 +249,6 @@ export const getOrders = async (req, res) => {
     const orders = await Order.find({}).populate("user", "id firstName lastName email").sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
-    console.error("Error al obtener órdenes:", error);
     res.status(500).json({ message: "Error al obtener las órdenes." });
   }
 };
@@ -287,7 +290,7 @@ export const updateOrderStatus = async (req, res) => {
           
           // Enviar correo de éxito al usuario
           if (order.user && order.user.email) {
-            sendOrderSuccessEmail(order.user.email, order).catch(err => console.error("Error enviando email de orden:", err));
+            sendOrderSuccessEmail(order.user.email, order).catch(() => {});
           }
         }
         if (!isPaid) order.paidAt = undefined;
@@ -306,7 +309,6 @@ export const updateOrderStatus = async (req, res) => {
     const updatedOrder = await order.save();
     res.json(updatedOrder);
   } catch (error) {
-    console.error("Error al actualizar estado de la orden:", error);
     res.status(500).json({ message: "Error al actualizar estado." });
   }
 };
@@ -328,7 +330,7 @@ export const confirmDelivery = async (req, res) => {
     }
 
     // Verificar que la orden pertenece al usuario
-    if (order.user.toString() !== req.user._id.toString()) {
+    if (!checkOrderOwnership(order, req.user)) {
       return res.status(403).json({ message: "No autorizado para confirmar esta orden." });
     }
 
@@ -342,7 +344,6 @@ export const confirmDelivery = async (req, res) => {
     const updatedOrder = await order.save();
     res.json(updatedOrder);
   } catch (error) {
-    console.error("Error al confirmar entrega:", error);
     res.status(500).json({ message: "Error al confirmar recepción." });
   }
 };
@@ -355,7 +356,6 @@ export const getMyOrders = async (req, res) => {
     const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
-    console.error("Error al obtener mis órdenes:", error);
     res.status(500).json({ message: "Error al obtener tus órdenes." });
   }
 };
