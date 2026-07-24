@@ -17,8 +17,13 @@ connectDB();
 const app = express();
 
 // Middlewares
+const allowedOrigins = [process.env.FRONTEND_URL, 'https://nova-setup.vercel.app'];
+if (process.env.NODE_ENV !== 'production') {
+  allowedOrigins.push('http://localhost:5173');
+}
+
 app.use(cors({
-  origin: [process.env.FRONTEND_URL, 'https://nova-setup.vercel.app', 'http://localhost:5173'],
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json());

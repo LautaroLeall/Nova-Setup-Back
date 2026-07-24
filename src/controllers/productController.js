@@ -203,7 +203,7 @@ export const updateProduct = async (req, res) => {
             await sendRestockEmail(emails, updatedProduct);
           }
         } catch (emailError) {
-          console.error("Error al enviar correos de restock:", emailError.message);
+          // Error ignorado
         }
       }
 
@@ -283,17 +283,13 @@ export const createProductReview = async (req, res) => {
         return res.status(400).json({ message: 'Ya has calificado este producto en esta compra.' });
       }
     } else {
-      const orders = await Order.find({ user: req.user._id, status: 'delivered' }).sort({ deliveredAt: -1 });
+      const order = await Order.findOne({ user: req.user._id, status: 'delivered', 'orderItems.product': productId }).sort({ deliveredAt: -1 });
 
       let foundOrder = null;
-      for (const order of orders) {
-        const hasProduct = order.orderItems.some(item => item.product.toString() === productId.toString());
-        if (hasProduct && order.deliveredAt) {
-          const timeSinceDelivery = now - new Date(order.deliveredAt).getTime();
-          if (timeSinceDelivery <= SEVEN_DAYS_MS && !reviewedOrderIds.includes(order._id.toString())) {
-            foundOrder = order;
-            break;
-          }
+      if (order && order.deliveredAt) {
+        const timeSinceDelivery = now - new Date(order.deliveredAt).getTime();
+        if (timeSinceDelivery <= SEVEN_DAYS_MS && !reviewedOrderIds.includes(order._id.toString())) {
+          foundOrder = order;
         }
       }
 
