@@ -38,7 +38,6 @@ const authUser = async (req, res) => {
       res.status(401).json({ message: "Email o contraseña incorrectos" });
     }
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: "Error en el servidor" });
   }
 };
@@ -73,12 +72,15 @@ const registerUser = async (req, res) => {
       }
     }
 
-    // SEC-02: Hashear la contraseña ANTES de incluirla en el JWT
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const user = await User.create({
+      firstName,
+      lastName,
+      email,
+      password,
+    });
 
     const tempToken = jwt.sign(
-      { firstName, lastName, email, password: hashedPassword },
+      { userId: user._id },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
@@ -87,7 +89,6 @@ const registerUser = async (req, res) => {
 
     res.status(200).json({ message: "Usuario registrado con éxito. Por favor revisa tu bandeja de entrada (y tu carpeta de SPAM) para verificar tu cuenta." });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: "Error en el servidor: " + error.message });
   }
 };
@@ -260,49 +261,19 @@ const verifyEmail = async (req, res) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const userExists = await User.findOne({ email: decoded.email });
-    if (userExists) {
-      if (userExists.isEmailVerified) {
-        return res.status(400).json({ message: "El correo ya ha sido verificado anteriormente. Puedes iniciar sesión." });
-      } else {
-        await userExists.deleteOne();
-      }
+    const query = decoded.userId ? { _id: decoded.userId } : { email: decoded.email };
+    const userExists = await User.findOne(query);
+    
+    if (!userExists) {
+        return res.status(400).json({ message: "Usuario no encontrado." });
     }
 
-    // SEC-02 + BUG-04: La contraseña ya viene hasheada desde registerUser.
-    // Usamos directamente sin que el pre-save la hashee de nuevo.
-    // Para esto, usamos Model.create() con el campo ya hasheado y 
-    // aprovechamos que el pre-save solo hashea si isModified('password'),
-    // pero como es un documento nuevo, lo hacemos con save() después de setear directamente.
-    const newUser = new User({
-      firstName: decoded.firstName,
-      lastName: decoded.lastName,
-      email: decoded.email,
-      isEmailVerified: true,
-    });
-    // Asignamos la contraseña ya hasheada directamente en el objeto interno
-    // sin pasar por pre-save (usando set en la BD directamente via findOneAndUpdate sería más seguro,
-    // pero como el pre-save verifica isModified, funciona correctamente):
-    newUser.password = decoded.password;
-    // NOTA: El pre-save de bcrypt verifica isModified('password').
-    // Como es un documento nuevo (isNew=true), isModified retorna true,
-    // lo cual causaría doble hash. Por eso hacemos el siguiente bypass:
-    newUser.$ignore = ['password']; // No es un método real de mongoose
+    if (userExists.isEmailVerified) {
+      return res.status(400).json({ message: "El correo ya ha sido verificado anteriormente. Puedes iniciar sesión." });
+    }
 
-    // La forma más segura: usar insertOne directo para evitar el middleware
-    const User2 = User;
-    await User2.collection.insertOne({
-      firstName: decoded.firstName,
-      lastName: decoded.lastName,
-      email: decoded.email,
-      password: decoded.password, // Ya hasheada desde registerUser
-      isEmailVerified: true,
-      isAdmin: false,
-      favorites: [],
-      shippingAddress: { fullName: "", address: "", city: "", postalCode: "", province: "", phone: "" },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    userExists.isEmailVerified = true;
+    await userExists.save();
 
     res.json({ message: "Email verificado correctamente. Ya puedes iniciar sesión." });
   } catch (error) {
@@ -360,7 +331,6 @@ const googleAuth = async (req, res) => {
       token: token,
     });
   } catch (error) {
-    console.error("Error en google auth:", error.message);
     res.status(401).json({ message: "Fallo la autenticación con Google" });
   }
 };
@@ -380,7 +350,7 @@ const forgotPassword = async (req, res) => {
     }
 
     if (!user.password && user.googleId) {
-      return res.status(400).json({ message: "Iniciaste sesión con Google, no tienes contraseña. Inicia sesión con Google." });
+      return res.json({ message: "Si el correo existe, te hemos enviado un enlace para restablecer tu contraseña." });
     }
 
     const resetToken = jwt.sign(
@@ -393,7 +363,6 @@ const forgotPassword = async (req, res) => {
 
     res.json({ message: "Si el correo existe, te hemos enviado un enlace para restablecer tu contraseña." });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: "Error al solicitar restablecimiento de contraseña" });
   }
 };
