@@ -38,7 +38,6 @@ export const toggleFavorite = async (req, res) => {
 
     res.json(favoriteIds);
   } catch (error) {
-    console.error("Error en toggleFavorite:", error);
     res.status(500).json({ message: "Error al actualizar favoritos", error: error.message });
   }
 };
